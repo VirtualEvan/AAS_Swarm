@@ -1,0 +1,54 @@
+---
+- hosts: all
+  tasks: 
+  - name: Install prerequisites
+    apt: name={{item}} state=present
+    with_items:
+        - apt-transport-https
+        - ca-certificates
+        - curl
+        - gnupg2
+        - software-properties-common
+  
+  - name: Add PGP key
+    shell: curl -fsSL https://download.docker.com/linux/debian/gpg | apt-key add -
+
+  - name: Add repository
+    shell: add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/debian {{ansible_distribution_release}} stable"
+
+  - name: Install docker-ce
+    apt: name="docker-ce" state=present
+
+  - name: Leave swarm (testing purposes)
+    shell: docker swarm leave --force
+    ignore_errors: yes
+
+- hosts: leader
+  tasks:
+  - name: Swarm init
+    shell: docker swarm init
+
+  - name: Get docker join command for managers
+    shell: docker swarm join-token manager | tail -3
+    register: manager_cmd
+
+  - name: Get docker join command for workers
+    shell: docker swarm join-token worker | tail -3
+    register: worker_cmd
+
+  - name: Set manager fact
+    set_fact: manager_command=manager_cmd.stdout
+
+  - name: Set worker fact
+    set_fact: worker_command=worker_cmd.stdout
+
+- hosts: managers
+  tasks:
+  - name: Join docker swarm (managers except leader)
+    shell: "{{ hostvars['leader']['manager_command'] }}"
+    when: manager_command is not defined
+    
+- hosts: workers
+  tasks:
+  - name: Join docker swarm
+    shell: "{{ hostvars['leader']['worker_command'] }}"
